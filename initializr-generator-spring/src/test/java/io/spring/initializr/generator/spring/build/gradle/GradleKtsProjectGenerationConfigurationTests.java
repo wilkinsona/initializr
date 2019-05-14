@@ -28,7 +28,7 @@ import java.util.stream.Stream;
 import io.spring.initializr.generator.buildsystem.BuildWriter;
 import io.spring.initializr.generator.buildsystem.Dependency;
 import io.spring.initializr.generator.buildsystem.DependencyScope;
-import io.spring.initializr.generator.buildsystem.gradle.GradleKtsBuildSystem;
+import io.spring.initializr.generator.buildsystem.gradle.GradleBuildSystem;
 import io.spring.initializr.generator.buildsystem.gradle.KotlinDslGradleBuildWriter;
 import io.spring.initializr.generator.language.java.JavaLanguage;
 import io.spring.initializr.generator.packaging.war.WarPackaging;
@@ -68,8 +68,8 @@ class GradleKtsProjectGenerationConfigurationTests {
 				.withDirectory(directory)
 				.withBean(InitializrMetadata.class,
 						() -> InitializrMetadataTestBuilder.withDefaults().build())
-				.withDescriptionCustomizer((description) -> description
-						.setBuildSystem(new GradleKtsBuildSystem()));
+				.withDescriptionCustomizer((description) -> description.setBuildSystem(
+						new GradleBuildSystem(GradleBuildSystem.DIALECT_KOTLIN)));
 	}
 
 	static Stream<Arguments> supportedPlatformVersions() {
