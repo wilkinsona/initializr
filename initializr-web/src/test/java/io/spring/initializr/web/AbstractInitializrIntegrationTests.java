@@ -16,6 +16,7 @@
 
 package io.spring.initializr.web;
 
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.Charset;
@@ -28,6 +29,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.List;
 import java.util.Set;
+import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
@@ -70,7 +72,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 @SpringBootTest(classes = Config.class)
 public abstract class AbstractInitializrIntegrationTests {
 
-	protected static final MediaType CURRENT_METADATA_MEDIA_TYPE = InitializrMetadataVersion.V2_1.getMediaType();
+	protected static final MediaType CURRENT_METADATA_MEDIA_TYPE = InitializrMetadataVersion.V2_1
+			.getMediaType();
 
 	private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -94,11 +97,13 @@ public abstract class AbstractInitializrIntegrationTests {
 	 * @param response the response
 	 * @param expected the expected result
 	 */
-	protected void validateContentType(ResponseEntity<String> response, MediaType expected) {
+	protected void validateContentType(ResponseEntity<String> response,
+			MediaType expected) {
 		MediaType actual = response.getHeaders().getContentType();
 		assertThat(actual).isNotNull();
 		assertThat(actual.isCompatibleWith(expected))
-				.as("Non compatible media-type, expected " + expected + ", got " + actual).isTrue();
+				.as("Non compatible media-type, expected " + expected + ", got " + actual)
+				.isTrue();
 	}
 
 	protected JsonNode parseJson(String text) {
@@ -110,8 +115,8 @@ public abstract class AbstractInitializrIntegrationTests {
 		}
 	}
 
-	protected void validateMetadata(ResponseEntity<String> response, MediaType mediaType, String version,
-			JSONCompareMode compareMode) {
+	protected void validateMetadata(ResponseEntity<String> response, MediaType mediaType,
+			String version, JSONCompareMode compareMode) {
 		try {
 			validateContentType(response, mediaType);
 			JSONObject json = new JSONObject(response.getBody());
@@ -131,7 +136,8 @@ public abstract class AbstractInitializrIntegrationTests {
 	protected void validateCurrentMetadata(String json) {
 		try {
 			JSONObject expected = readMetadataJson("2.1.0");
-			JSONAssert.assertEquals(expected, new JSONObject(json), JSONCompareMode.STRICT);
+			JSONAssert.assertEquals(expected, new JSONObject(json),
+					JSONCompareMode.STRICT);
 		}
 		catch (JSONException ex) {
 			throw new IllegalArgumentException("Invalid json", ex);
@@ -174,12 +180,13 @@ public abstract class AbstractInitializrIntegrationTests {
 		return this.restTemplate.getForEntity(createUrl(context), byte[].class);
 	}
 
-	protected ResponseEntity<String> invokeHome(String userAgentHeader, String... acceptHeaders) {
+	protected ResponseEntity<String> invokeHome(String userAgentHeader,
+			String... acceptHeaders) {
 		return execute("/", String.class, userAgentHeader, acceptHeaders);
 	}
 
-	protected <T> ResponseEntity<T> execute(String contextPath, Class<T> responseType, String userAgentHeader,
-			String... acceptHeaders) {
+	protected <T> ResponseEntity<T> execute(String contextPath, Class<T> responseType,
+			String userAgentHeader, String... acceptHeaders) {
 		HttpHeaders headers = new HttpHeaders();
 		if (userAgentHeader != null) {
 			headers.set("User-Agent", userAgentHeader);
@@ -194,8 +201,8 @@ public abstract class AbstractInitializrIntegrationTests {
 		else {
 			headers.setAccept(Collections.emptyList());
 		}
-		return this.restTemplate.exchange(createUrl(contextPath), HttpMethod.GET, new HttpEntity<Void>(headers),
-				responseType);
+		return this.restTemplate.exchange(createUrl(contextPath), HttpMethod.GET,
+				new HttpEntity<Void>(headers), responseType);
 	}
 
 	protected ProjectAssert projectAssert(byte[] content, ArchiveType archiveType) {
@@ -230,7 +237,7 @@ public abstract class AbstractInitializrIntegrationTests {
 					Files.createDirectories(path.getParent());
 					Files.write(path, StreamUtils.copyToByteArray(input));
 				}
-				Files.setPosixFilePermissions(path, getPosixFilePermissions(entry.getMode()));
+				applyPermissions(path, getPosixFilePermissions(entry.getMode()));
 			}
 		}
 	}
@@ -246,16 +253,50 @@ public abstract class AbstractInitializrIntegrationTests {
 				}
 				else {
 					Files.createDirectories(path.getParent());
-					Files.write(path, StreamUtils.copyToByteArray(zip.getInputStream(entry)));
+					Files.write(path,
+							StreamUtils.copyToByteArray(zip.getInputStream(entry)));
 				}
-				Files.setPosixFilePermissions(path, getPosixFilePermissions(entry.getUnixMode()));
+				applyPermissions(path, getPosixFilePermissions(entry.getUnixMode()));
 			}
 		}
 	}
 
 	private Set<PosixFilePermission> getPosixFilePermissions(int unixMode) {
-		return Arrays.stream(BitMaskFilePermission.values()).filter((permission) -> permission.permitted(unixMode))
-				.map(BitMaskFilePermission::getFilePermission).collect(Collectors.toSet());
+		return Arrays.stream(BitMaskFilePermission.values())
+				.filter((permission) -> permission.permitted(unixMode))
+				.map(BitMaskFilePermission::getFilePermission)
+				.collect(Collectors.toSet());
+	}
+
+	private void applyPermissions(Path target, Set<PosixFilePermission> permissions)
+			throws IOException {
+		if (isWindows()) {
+			File file = target.toFile();
+			applyPermission(file::setReadable, permissions,
+					PosixFilePermission.OWNER_READ, PosixFilePermission.GROUP_READ,
+					PosixFilePermission.OTHERS_READ);
+			applyPermission(file::setWritable, permissions,
+					PosixFilePermission.OWNER_WRITE, PosixFilePermission.GROUP_WRITE,
+					PosixFilePermission.OTHERS_WRITE);
+			applyPermission(file::setExecutable, permissions,
+					PosixFilePermission.OWNER_EXECUTE, PosixFilePermission.GROUP_EXECUTE,
+					PosixFilePermission.OTHERS_EXECUTE);
+		}
+		else {
+			Files.setPosixFilePermissions(target, permissions);
+		}
+	}
+
+	private void applyPermission(BiConsumer<Boolean, Boolean> target,
+			Set<PosixFilePermission> permissions, PosixFilePermission ownerPermission,
+			PosixFilePermission... nonOwnerPermissions) {
+		boolean ownerOnly = Arrays.stream(nonOwnerPermissions)
+				.noneMatch(permissions::contains);
+		target.accept(permissions.contains(ownerPermission), ownerOnly);
+	}
+
+	private boolean isWindows() {
+		return File.separatorChar == '\\';
 	}
 
 	protected Path writeArchive(byte[] body) throws IOException {
